@@ -1,0 +1,147 @@
+
+//Contract written by @0xJelle; Artwork by @0xJelle;
+
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.0;
+
+import "@openzeppelin/contracts/token/ERC721/extensions/ERC721URIStorage.sol";
+import "@openzeppelin/contracts/utils/Counters.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";//Ownership can be sent to a multisig wallet for added security
+import "@openzeppelin/contracts/security/Pausable.sol";
+
+
+//////////////////////////////////added interface to migrate from old contract//////////////////////////////////
+interface IOwnerOld {
+    function ownerOf(uint256) external view returns(address); //read the ownerOf function from the old contract and return the owner address
+}
+/////////////////////////////////////////////////end of interface/////////////////////////////////////////////////
+
+contract JellyTree is ERC721URIStorage, Ownable, Pausable
+{
+  using Counters for Counters.Counter;
+  using Strings for uint256;
+
+  Counters.Counter private _tokenIds;
+
+  uint256 public maxMintable = (333);//no more than this many nfts can be minted (about the current supply of egg tokens
+  string public baseURI;
+  string public baseExtension = ".json"; 
+
+  uint public _royaltyAmount = 690; //starts with 6.9% royalties on the I Voted sticker nfts
+
+  bool public pauseMinting = false;
+
+  bytes4 private constant _INTERFACE_ID_ERC2981 = 0x2a55205a; //this is from the campfire docs style royalty code implementation
+
+  
+  mapping (uint=>uint) public StickerMapper; //maps nft token ID to a contestant ID; so we can have 32 different stickers/postrs, one for each contestant.
+  address public voterContractAddress;//address of our votr contract that has permission to mint postrs after user vote
+
+
+
+  constructor() ERC721("Beauty Pageant Postr", "POSTR") {
+    baseURI = "ipfs://bafybeieitbqzd45om4dgic43gaq5jtjavowtiyc4ac6lzuyz3knm7btiaq";//add in ipfs location info for the json metadata test 
+  }//End of constructor
+
+  
+
+
+///////////////////////////////////////NFT Aidrop CODE/////////////////////////////////////////////////////
+  function AirdropToHoldersOf(address _oldNftContract, uint256 _starting, uint256 _ending) public onlyOwner {
+        for(uint i=_starting; i<=_ending; i++){  //we loop the ID numbers specified including the start and end numbers
+            address _xTo = IOwnerOld(_oldNftContract).ownerOf(i); //code to read old contract holder address by ID number for migration
+            _privateMint(_xTo); //we mint new token to old owner of ID i
+        }
+  }
+
+
+//////////////////////////////////////END OF NFT aidrop CODE///////////////////////////////////////////////
+
+
+
+//Added in pausable functions from Openzepplin contract wizard
+  function pause() public onlyOwner {
+    _pause();
+  }
+
+  function unpause() public onlyOwner {
+    _unpause();
+  }
+
+  function _beforeTokenTransfer(address from, address to, uint256 _tokenId)
+    internal
+    whenNotPaused
+    override
+  {
+    super._beforeTokenTransfer(from, to, _tokenId);
+  }
+
+
+
+
+  function totalSupply() public view returns (uint256) { //nft supply minted so far
+    return _tokenIds.current();
+  }
+
+  function setNftRoyalties(uint _newRoyalties) public onlyOwner{//1000 input = 10.00% or 0.1000/1 royalties
+    require (_newRoyalties <= 2000, "Royalties over 20% not allowed");
+    require (_newRoyalties >=0, "Royalties cannot be a negative number");
+    _royaltyAmount = _newRoyalties;
+  }
+
+
+  function setBaseURI(string memory _newBaseURI) public onlyOwner { //nft ipfs link, use format like "ipfs://QmNtSpy4aDx6k5gNcePnbiHpnPZnDaeYbN9MKS4ZrNui8Q/"
+    baseURI = _newBaseURI;
+  }
+
+
+  function ownerMintSend(address recipient) external onlyOwner{//could also use this to mint special postrs with new "contestant id number" just to get to new json file for uniques or whatever by hand. Or same postr but in gold or different color. Maybe make some for each team member and extras for giveaways. 
+      _privateMint(recipient);
+  }
+
+  function ownerMintSelf() external onlyOwner{
+      _privateMint(msg.sender);
+  }
+  
+ 
+  function setMaxMintable(uint _maxMintable) public onlyOwner{ //nft
+    maxMintable=_maxMintable;
+  }
+
+  function _privateMint(address recipient) private { //nft mint hashlips inspired
+    require(_tokenIds.current() <= maxMintable, "Too many NFTs have been minted, max capacity reached");
+    _tokenIds.increment();
+    uint256 newItemId = _tokenIds.current();
+    _mint(recipient, newItemId);
+  }
+
+  //hashlips code to use ipfs pointer to json files
+  function tokenURI(uint256 tokenId) public view virtual override returns (string memory) {
+    require( _exists(tokenId), "ERC721Metadata: URI query for nonexistent token");
+    string memory currentBaseURI = _baseURI();
+    return bytes(currentBaseURI).length > 0 ? string(abi.encodePacked(currentBaseURI, Strings.toString(tokenId), baseExtension)) : "";
+  }
+
+  function _baseURI() internal view virtual override returns (string memory) {
+    return baseURI;
+  }
+
+
+//royalty function from Campfire docs
+  function royaltyInfo(////this whole function is a calculator that marketplaces need for the royalties to work
+    uint256 _tokenId, ///////Do Not remove, Marketplaces need this tokenId input///////////
+    uint256 _salePrice
+  ) external view returns (address receiver, uint256 royaltyAmount) {
+    return (owner(), ((_salePrice * _royaltyAmount) / 10000));//Contract owner wallet receives royalties. Can set to gnosis multisig wallet for security of funds.
+  }
+
+  function supportsInterface(bytes4 interfaceId) public view virtual override(ERC721) returns (bool) {
+    if (interfaceId == _INTERFACE_ID_ERC2981) {
+      return true;
+    }
+    return super.supportsInterface(interfaceId);
+  } 
+
+
+
+}
